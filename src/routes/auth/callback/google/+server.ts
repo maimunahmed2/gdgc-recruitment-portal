@@ -1,64 +1,129 @@
 import { env } from '$env/dynamic/private';
-import type { RequestHandler } from '@sveltejs/kit';
 import { oauthResponseHtml } from '$lib/server/oauth';
+import type { RequestHandler } from '@sveltejs/kit';
+
+type GoogleTokenResponse = {
+	access_token?: string;
+	error?: string;
+	error_description?: string;
+};
+
+type GoogleProfile = {
+	email?: string;
+	name?: string;
+	picture?: string;
+	sub?: string;
+};
 
 export const GET: RequestHandler = async (event) => {
-  try {
-    const mock = event.url.searchParams.get('mock');
-    const email = event.url.searchParams.get('email');
-    const name = event.url.searchParams.get('name');
-    const code = event.url.searchParams.get('code');
+	try {
+		const mock = event.url.searchParams.get('mock');
+		const email = event.url.searchParams.get('email');
+		const name = event.url.searchParams.get('name');
+		const code = event.url.searchParams.get('code');
 
-    if (mock === 'true') {
-      return html(oauthResponseHtml(event, email || '', name || 'Google User', 'google'));
-    }
+		if (mock === 'true') {
+			return html(await oauthResponseHtml(event, email || '', name || 'Google User', 'google'));
+		}
 
-    if (!code) {
-      return html(oauthResponseHtml(event, '', '', 'google', 'Authorization code is missing'));
-    }
+		if (!code) {
+			return html(
+				await oauthResponseHtml(event, '', '', 'google', 'Authorization code is missing')
+			);
+		}
 
-    const redirectUri = `${event.url.origin}/auth/callback/google`;
+		const redirectUri = `${event.url.origin}/auth/callback/google`;
 
-    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        code,
-        client_id: env.GOOGLE_CLIENT_ID || '',
-        client_secret: env.GOOGLE_CLIENT_SECRET || '',
-        redirect_uri: redirectUri,
-        grant_type: 'authorization_code'
-      }).toString()
-    });
+		const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/x-www-form-urlencoded'
+			},
+			body: new URLSearchParams({
+				code,
+				client_id: env.GOOGLE_CLIENT_ID || '',
+				client_secret: env.GOOGLE_CLIENT_SECRET || '',
+				redirect_uri: redirectUri,
+				grant_type: 'authorization_code'
+			}).toString()
+		});
 
-    if (!tokenResponse.ok) {
-      const errorText = await tokenResponse.text();
-      return html(oauthResponseHtml(event, '', '', 'google', `Failed to exchange token: ${errorText}`));
-    }
+		if (!tokenResponse.ok) {
+			const errorText = await tokenResponse.text();
 
-    const tokens = await tokenResponse.json();
-    const accessToken = tokens.access_token;
+			return html(
+				await oauthResponseHtml(
+					event,
+					'',
+					'',
+					'google',
+					`Failed to exchange token: ${errorText}`
+				)
+			);
+		}
 
-    const profileResponse = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-      headers: { Authorization: `Bearer ${accessToken}` }
-    });
+		const tokens = (await tokenResponse.json()) as GoogleTokenResponse;
+		const accessToken = tokens.access_token;
 
-    if (!profileResponse.ok) {
-      return html(oauthResponseHtml(event, '', '', 'google', 'Failed to retrieve profile information'));
-    }
+		if (!accessToken) {
+			const errorMessage =
+				tokens.error_description || tokens.error || 'No access token returned from Google';
 
-    const profile = await profileResponse.json();
+			return html(await oauthResponseHtml(event, '', '', 'google', errorMessage));
+		}
 
-    if (!profile.email) {
-      return html(oauthResponseHtml(event, '', '', 'google', 'No email address associated with Google profile'));
-    }
+		const profileResponse = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+			headers: {
+				Authorization: `Bearer ${accessToken}`
+			}
+		});
 
-    return html(oauthResponseHtml(event, profile.email, profile.name || 'Google User', 'google'));
-  } catch (error: any) {
-    return html(oauthResponseHtml(event, '', '', 'google', error.message || 'Server error during Google auth callback'));
-  }
+		if (!profileResponse.ok) {
+			return html(
+				await oauthResponseHtml(
+					event,
+					'',
+					'',
+					'google',
+					'Failed to retrieve profile information'
+				)
+			);
+		}
+
+		const profile = (await profileResponse.json()) as GoogleProfile;
+
+		if (!profile.email) {
+			return html(
+				await oauthResponseHtml(
+					event,
+					'',
+					'',
+					'google',
+					'No email address associated with Google profile'
+				)
+			);
+		}
+
+		return html(
+			await oauthResponseHtml(
+				event,
+				profile.email,
+				profile.name || 'Google User',
+				'google'
+			)
+		);
+	} catch (error: unknown) {
+		const message =
+			error instanceof Error ? error.message : 'Server error during Google auth callback';
+
+		return html(await oauthResponseHtml(event, '', '', 'google', message));
+	}
 };
 
 function html(body: string) {
-  return new Response(body, { headers: { 'Content-Type': 'text/html' } });
+	return new Response(body, {
+		headers: {
+			'Content-Type': 'text/html'
+		}
+	});
 }
