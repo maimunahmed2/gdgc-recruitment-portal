@@ -1,14 +1,14 @@
-import { json, type RequestHandler } from '@sveltejs/kit';
-import bcrypt from 'bcryptjs';
-import type { UserWithPassword } from '$lib/types';
-import { emailRegex, generateOtp, passwordRegex } from '$lib/server/auth';
 import { logActivity } from '$lib/server/activity';
+import { emailRegex, generateOtp, passwordRegex } from '$lib/server/auth';
 import { readUsers, seedDatabase, toSafeUser, writeUsers } from '$lib/server/db';
 import { buildVerificationEmail, hasSmtpConfig, sendEmail } from '$lib/server/email';
+import type { UserWithPassword } from '$lib/types';
+import { json, type RequestHandler } from '@sveltejs/kit';
+import bcrypt from 'bcryptjs';
 
 export const POST: RequestHandler = async (event) => {
   try {
-    seedDatabase();
+    await seedDatabase();
     const { name, email, password } = await event.request.json();
 
     if (!name || !email || !password) {
@@ -33,11 +33,11 @@ export const POST: RequestHandler = async (event) => {
       );
     }
 
-    const users = readUsers();
+    const users = await readUsers();
     const existingUser = users.find((user) => user.email.toLowerCase() === email.toLowerCase());
 
     if (existingUser) {
-      logActivity(event, 'unknown', email, 'register', 'failed', 'Email already registered');
+      await logActivity(event, 'unknown', email, 'register', 'failed', 'Email already registered');
       return json({ error: 'Email address is already registered' }, { status: 409 });
     }
 
@@ -57,9 +57,9 @@ export const POST: RequestHandler = async (event) => {
     };
 
     users.push(newUser);
-    writeUsers(users);
+    await writeUsers(users);
 
-    logActivity(event, newUser.id, email, 'register', 'success', 'User registered successfully');
+    await logActivity(event, newUser.id, email, 'register', 'success', 'User registered successfully');
     sendEmail(buildVerificationEmail(email, name.trim(), verificationCode));
 
     return json(

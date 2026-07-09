@@ -1,8 +1,8 @@
+import { logActivity } from '$lib/server/activity';
+import { passwordRegex, requireAuth } from '$lib/server/auth';
+import { readUsers, writeUsers } from '$lib/server/db';
 import { json, type RequestHandler } from '@sveltejs/kit';
 import bcrypt from 'bcryptjs';
-import { passwordRegex, requireAuth } from '$lib/server/auth';
-import { logActivity } from '$lib/server/activity';
-import { readUsers, writeUsers } from '$lib/server/db';
 
 export const POST: RequestHandler = async (event) => {
   try {
@@ -22,7 +22,7 @@ export const POST: RequestHandler = async (event) => {
       );
     }
 
-    const users = readUsers();
+    const users = await readUsers();
     const userIndex = users.findIndex((user) => user.id === auth.user.id);
 
     if (userIndex === -1) return json({ error: 'User not found' }, { status: 404 });
@@ -30,7 +30,7 @@ export const POST: RequestHandler = async (event) => {
     const user = users[userIndex];
 
     if (!bcrypt.compareSync(currentPassword, user.passwordHash)) {
-      logActivity(event, user.id, user.email, 'password_change', 'failed', 'Incorrect current password during change request');
+      await logActivity(event, user.id, user.email, 'password_change', 'failed', 'Incorrect current password during change request');
       return json({ error: 'Incorrect current password' }, { status: 400 });
     }
 
@@ -40,9 +40,9 @@ export const POST: RequestHandler = async (event) => {
 
     user.passwordHash = bcrypt.hashSync(newPassword, 10);
     users[userIndex] = user;
-    writeUsers(users);
+    await writeUsers(users);
 
-    logActivity(event, user.id, user.email, 'password_change', 'success', 'Password changed from Security Center');
+    await logActivity(event, user.id, user.email, 'password_change', 'success', 'Password changed from Security Center');
 
     return json({ message: 'Password updated successfully!' });
   } catch {

@@ -1,96 +1,139 @@
-import fs from 'node:fs';
-import path from 'node:path';
+import {
+	FIREBASE_CLIENT_EMAIL,
+	FIREBASE_PRIVATE_KEY,
+	FIREBASE_PROJECT_ID
+} from '$env/static/private';
 import bcrypt from 'bcryptjs';
+import { cert, getApps, initializeApp } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
+
 import type { ActivityLog, SimulatedEmail, User, UserWithPassword } from '$lib/types';
 
-const DB_DIR = path.join(process.cwd(), 'data');
-const USERS_FILE = path.join(DB_DIR, 'users.json');
-const LOGS_FILE = path.join(DB_DIR, 'logs.json');
-const EMAILS_FILE = path.join(DB_DIR, 'emails.json');
+const firebaseProjectId = FIREBASE_PROJECT_ID;
+const firebaseClientEmail = FIREBASE_CLIENT_EMAIL;
+const firebasePrivateKey = FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n').replace(/^"|"$/g, '');
 
-function ensureDbDir() {
-  if (!fs.existsSync(DB_DIR)) {
-    fs.mkdirSync(DB_DIR, { recursive: true });
-  }
+if (!firebaseProjectId || !firebaseClientEmail || !firebasePrivateKey) {
+	throw new Error(
+		'Missing Firebase Admin env variables. Check FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY in your .env file.'
+	);
 }
 
-function readJsonFile<T>(filePath: string, fallback: T): T {
-  ensureDbDir();
-
-  if (!fs.existsSync(filePath)) return fallback;
-
-  try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf-8')) as T;
-  } catch {
-    return fallback;
-  }
+if (!getApps().length) {
+	initializeApp({
+		credential: cert({
+			projectId: firebaseProjectId,
+			clientEmail: firebaseClientEmail,
+			privateKey: firebasePrivateKey
+		})
+	});
 }
 
-function writeJsonFile<T>(filePath: string, data: T) {
-  ensureDbDir();
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+const db = getFirestore();
+
+const usersCollection = db.collection('users');
+const logsCollection = db.collection('activityLogs');
+const emailsCollection = db.collection('simulatedEmails');
+
+export async function readUsers(): Promise<UserWithPassword[]> {
+	const snapshot = await usersCollection.orderBy('createdAt', 'asc').get();
+
+	return snapshot.docs.map((doc) => doc.data() as UserWithPassword);
 }
 
-export function readUsers(): UserWithPassword[] {
-  return readJsonFile<UserWithPassword[]>(USERS_FILE, []);
+export async function writeUsers(users: UserWithPassword[]) {
+	const snapshot = await usersCollection.get();
+	const batch = db.batch();
+
+	for (const doc of snapshot.docs) {
+		batch.delete(doc.ref);
+	}
+
+	for (const user of users) {
+		batch.set(usersCollection.doc(user.id), user);
+	}
+
+	await batch.commit();
 }
 
-export function writeUsers(users: UserWithPassword[]) {
-  writeJsonFile(USERS_FILE, users);
+export async function readLogs(): Promise<ActivityLog[]> {
+	const snapshot = await logsCollection.orderBy('timestamp', 'desc').get();
+
+	return snapshot.docs.map((doc) => doc.data() as ActivityLog);
 }
 
-export function readLogs(): ActivityLog[] {
-  return readJsonFile<ActivityLog[]>(LOGS_FILE, []);
+export async function writeLogs(logs: ActivityLog[]) {
+	const snapshot = await logsCollection.get();
+	const batch = db.batch();
+
+	for (const doc of snapshot.docs) {
+		batch.delete(doc.ref);
+	}
+
+	for (const log of logs) {
+		batch.set(logsCollection.doc(log.id), log);
+	}
+
+	await batch.commit();
 }
 
-export function writeLogs(logs: ActivityLog[]) {
-  writeJsonFile(LOGS_FILE, logs);
+export async function readEmails(): Promise<SimulatedEmail[]> {
+	const snapshot = await emailsCollection.orderBy('timestamp', 'desc').get();
+
+	return snapshot.docs.map((doc) => doc.data() as SimulatedEmail);
 }
 
-export function readEmails(): SimulatedEmail[] {
-  return readJsonFile<SimulatedEmail[]>(EMAILS_FILE, []);
-}
+export async function writeEmails(emails: SimulatedEmail[]) {
+	const snapshot = await emailsCollection.get();
+	const batch = db.batch();
 
-export function writeEmails(emails: SimulatedEmail[]) {
-  writeJsonFile(EMAILS_FILE, emails);
+	for (const doc of snapshot.docs) {
+		batch.delete(doc.ref);
+	}
+
+	for (const email of emails) {
+		batch.set(emailsCollection.doc(email.id), email);
+	}
+
+	await batch.commit();
 }
 
 export function toSafeUser(user: UserWithPassword): User {
-  return {
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    role: user.role,
-    isVerified: user.isVerified,
-    createdAt: user.createdAt,
-    twoFactorEnabled: !!user.twoFactorEnabled
-  };
+	return {
+		id: user.id,
+		name: user.name,
+		email: user.email,
+		role: user.role,
+		isVerified: user.isVerified,
+		createdAt: user.createdAt,
+		twoFactorEnabled: !!user.twoFactorEnabled
+	};
 }
 
-export function seedDatabase() {
-  const users = readUsers();
+export async function seedDatabase() {
+	const users = await readUsers();
 
-  if (users.length > 0) return;
+	if (users.length > 0) return;
 
-  const demoUser: UserWithPassword = {
-    id: 'usr_demo_user',
-    name: 'Alex Recruitment',
-    email: 'user@gdgc.edu',
-    role: 'user',
-    isVerified: true,
-    createdAt: new Date().toISOString(),
-    passwordHash: bcrypt.hashSync('UserPass123!', 10)
-  };
+	const demoUser: UserWithPassword = {
+		id: 'usr_demo_user',
+		name: 'Alex Recruitment',
+		email: 'user@gdgc.edu',
+		role: 'user',
+		isVerified: true,
+		createdAt: new Date().toISOString(),
+		passwordHash: bcrypt.hashSync('UserPass123!', 10)
+	};
 
-  const demoAdmin: UserWithPassword = {
-    id: 'usr_demo_admin',
-    name: 'GDGC Admin',
-    email: 'admin@gdgc.edu',
-    role: 'admin',
-    isVerified: true,
-    createdAt: new Date().toISOString(),
-    passwordHash: bcrypt.hashSync('AdminPass123!', 10)
-  };
+	const demoAdmin: UserWithPassword = {
+		id: 'usr_demo_admin',
+		name: 'GDGC Admin',
+		email: 'admin@gdgc.edu',
+		role: 'admin',
+		isVerified: true,
+		createdAt: new Date().toISOString(),
+		passwordHash: bcrypt.hashSync('AdminPass123!', 10)
+	};
 
-  writeUsers([demoUser, demoAdmin]);
+	await writeUsers([demoUser, demoAdmin]);
 }

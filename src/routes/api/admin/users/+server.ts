@@ -1,10 +1,10 @@
-import { json, type RequestHandler } from '@sveltejs/kit';
 import { requireAdmin } from '$lib/server/auth';
 import { readUsers, seedDatabase, toSafeUser } from '$lib/server/db';
+import { json, type RequestHandler } from '@sveltejs/kit';
 
 export const GET: RequestHandler = async (event) => {
   try {
-    seedDatabase();
+    await seedDatabase();
     const auth = requireAdmin(event);
     if ('response' in auth) return auth.response;
 

@@ -1,12 +1,12 @@
+import { logActivity } from '$lib/server/activity';
+import { passwordRegex } from '$lib/server/auth';
+import { readUsers, seedDatabase, writeUsers } from '$lib/server/db';
 import { json, type RequestHandler } from '@sveltejs/kit';
 import bcrypt from 'bcryptjs';
-import { passwordRegex } from '$lib/server/auth';
-import { logActivity } from '$lib/server/activity';
-import { readUsers, seedDatabase, writeUsers } from '$lib/server/db';
 
 export const POST: RequestHandler = async (event) => {
   try {
-    seedDatabase();
+    await seedDatabase();
     const { email, code, newPassword } = await event.request.json();
 
     if (!email || !code || !newPassword) return json({ error: 'All fields are required' }, { status: 400 });
@@ -18,7 +18,7 @@ export const POST: RequestHandler = async (event) => {
       );
     }
 
-    const users = readUsers();
+    const users = await readUsers();
     const userIndex = users.findIndex((user) => user.email.toLowerCase() === email.toLowerCase());
 
     if (userIndex === -1) return json({ error: 'User not found' }, { status: 404 });
@@ -26,12 +26,12 @@ export const POST: RequestHandler = async (event) => {
     const user = users[userIndex];
 
     if (!user.passwordResetCode || user.passwordResetCode !== code) {
-      logActivity(event, user.id, user.email, 'password_reset_success', 'failed', 'Invalid reset code');
+      await logActivity(event, user.id, user.email, 'password_reset_success', 'failed', 'Invalid reset code');
       return json({ error: 'Invalid password reset code' }, { status: 400 });
     }
 
     if (user.passwordResetCodeExpires && Date.now() > user.passwordResetCodeExpires) {
-      logActivity(event, user.id, user.email, 'password_reset_success', 'failed', 'Expired reset code');
+      await logActivity(event, user.id, user.email, 'password_reset_success', 'failed', 'Expired reset code');
       return json({ error: 'Reset code has expired. Please request a new one.' }, { status: 400 });
     }
 
@@ -45,9 +45,9 @@ export const POST: RequestHandler = async (event) => {
     if (!user.isVerified) user.isVerified = true;
 
     users[userIndex] = user;
-    writeUsers(users);
+    await writeUsers(users);
 
-    logActivity(event, user.id, user.email, 'password_reset_success', 'success', 'Password reset successfully');
+    await logActivity(event, user.id, user.email, 'password_reset_success', 'success', 'Password reset successfully');
 
     return json({ message: 'Password reset successfully! You can now log in with your new password.' });
   } catch {

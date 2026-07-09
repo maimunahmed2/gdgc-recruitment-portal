@@ -1,9 +1,9 @@
-import bcrypt from 'bcryptjs';
 import { env } from '$env/dynamic/private';
-import type { RequestEvent } from '@sveltejs/kit';
 import type { UserWithPassword } from '$lib/types';
-import { createToken } from './auth';
+import type { RequestEvent } from '@sveltejs/kit';
+import bcrypt from 'bcryptjs';
 import { logActivity } from './activity';
+import { createToken } from './auth';
 import { readUsers, toSafeUser, writeUsers } from './db';
 
 function escapeForScript(value: string) {
@@ -30,7 +30,7 @@ export function oauthResponseHtml(event: RequestEvent, email: string, name: stri
     `;
   }
 
-  const users = readUsers();
+  const users = await readUsers();
   let user = users.find((item) => item.email.toLowerCase() === email.toLowerCase());
   const providerLabel = provider === 'google' ? 'Google' : 'GitHub';
 
@@ -46,17 +46,17 @@ export function oauthResponseHtml(event: RequestEvent, email: string, name: stri
     };
 
     users.push(newUser);
-    writeUsers(users);
+    await writeUsers(users);
     user = newUser;
 
-    logActivity(event, user.id, email, 'register', 'success', `Signed up via ${providerLabel} OAuth`);
+    await logActivity(event, user.id, email, 'register', 'success', `Signed up via ${providerLabel} OAuth`);
   } else {
     if (!user.isVerified) {
       user.isVerified = true;
-      writeUsers(users);
+      await writeUsers(users);
     }
 
-    logActivity(event, user.id, email, 'login', 'success', `Logged in via ${providerLabel} OAuth`);
+    await logActivity(event, user.id, email, 'login', 'success', `Logged in via ${providerLabel} OAuth`);
   }
 
   const token = createToken(

@@ -1,6 +1,6 @@
-import nodemailer from 'nodemailer';
 import { env } from '$env/dynamic/private';
 import type { SimulatedEmail } from '$lib/types';
+import nodemailer from 'nodemailer';
 import { readEmails, writeEmails } from './db';
 
 export function hasSmtpConfig() {
@@ -36,10 +36,12 @@ export async function sendRealEmail(to: string, subject: string, html: string) {
   await transporter.sendMail({ from, to, subject, html });
 }
 
-export function sendEmail(simulatedEmail: SimulatedEmail) {
-  const emails = readEmails();
+export async function sendEmail(simulatedEmail: SimulatedEmail) {
+  const emails = await readEmails();
+
   emails.unshift(simulatedEmail);
-  writeEmails(emails);
+
+  await writeEmails(emails);
 
   sendRealEmail(simulatedEmail.to, simulatedEmail.subject, simulatedEmail.body).catch((error) => {
     console.error('Error in sendRealEmail background task:', error);

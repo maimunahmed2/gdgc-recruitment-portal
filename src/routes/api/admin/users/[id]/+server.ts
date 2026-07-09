@@ -1,8 +1,8 @@
-import { json, type RequestHandler } from '@sveltejs/kit';
-import type { ActivityLog } from '$lib/types';
-import { requireAdmin } from '$lib/server/auth';
 import { getRequestIp } from '$lib/server/activity';
+import { requireAdmin } from '$lib/server/auth';
 import { readLogs, readUsers, writeLogs, writeUsers } from '$lib/server/db';
+import type { ActivityLog } from '$lib/types';
+import { json, type RequestHandler } from '@sveltejs/kit';
 
 export const DELETE: RequestHandler = async (event) => {
   try {
@@ -15,7 +15,7 @@ export const DELETE: RequestHandler = async (event) => {
       return json({ error: 'Self-deletion is forbidden. You cannot delete your own admin account.' }, { status: 400 });
     }
 
-    const users = readUsers();
+    const users = await readUsers();
     const filteredUsers = users.filter((user) => user.id !== targetUserId);
 
     if (users.length === filteredUsers.length) {
@@ -24,7 +24,7 @@ export const DELETE: RequestHandler = async (event) => {
 
     writeUsers(filteredUsers);
 
-    const logs = readLogs();
+    const logs = await readLogs();
     const newLog: ActivityLog = {
       id: `log_${Math.random().toString(36).substring(2, 11)}`,
       userId: auth.user.id,
@@ -38,7 +38,7 @@ export const DELETE: RequestHandler = async (event) => {
     };
 
     logs.unshift(newLog);
-    writeLogs(logs);
+    await writeLogs(logs);
 
     return json({ message: 'User deleted successfully' });
   } catch {
