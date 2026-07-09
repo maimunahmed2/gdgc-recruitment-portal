@@ -1,0 +1,34 @@
+[
+  {
+    "id": "usr_demo_user",
+    "name": "Alex Recruitment",
+    "email": "user@gdgc.edu",
+    "role": "user",
+    "isVerified": true,
+    "createdAt": "2026-07-09T05:38:08.132Z",
+    "passwordHash": "$2b$10$yxLQ1ksmNjJoz1IfH4Vd4OQZxEbOgLxcq63J3EJU/gQKckIGumk5q"
+  },
+  {
+    "id": "usr_demo_admin",
+    "name": "GDGC Admin",
+    "email": "admin@gdgc.edu",
+    "role": "admin",
+    "isVerified": true,
+    "createdAt": "2026-07-09T05:38:08.270Z",
+    "passwordHash": "$2b$10$8Xxx.V5tjPauji50lpccAO0JIHD5pQ..4PFNbSKKjH6e5yBfL/Zja"
+  },
+  {
+    "id": "usr_p9811rj16",
+    "name": "maimun ahmed",
+    "email": "nits.maimun@gmail.com",
+    "role": "user",
+    "isVerified": false,
+    "createdAt": "2026-07-09T05:40:54.784Z",
+    "passwordHash": "$2b$10$MuCdIwKXScVo35qOWYi3i.XOQ.iZ3jzV2Iy0Pff2JVe06OMAXxwXm",
+    "verificationCode": "962976",
+    "verificationCodeExpires": 1783576554784,
+    "twoFactorEnabled": true,
+    "twoFactorCode": null,
+    "twoFactorCodeExpires": null
+  }
+]
