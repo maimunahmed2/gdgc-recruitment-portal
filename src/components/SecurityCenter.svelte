@@ -29,7 +29,7 @@
 		user: User;
 		logs: ActivityLog[];
 		twoFactor: boolean;
-		handleToggle2FA: () => void;
+		handleToggle2FA: () => void | Promise<void>;
 		currentPassword: string;
 		setCurrentPassword: (value: string) => void;
 		newPassword: string;
@@ -58,8 +58,24 @@
 		passwordStrength
 	}: SecurityCenterProps = $props();
 
+	let isToggling2FA = $state(false);
+
 	function getInputValue(event: Event) {
 		return (event.currentTarget as HTMLInputElement).value;
+	}
+
+	async function handleToggle2FAClick() {
+		if (isToggling2FA) return;
+
+		isToggling2FA = true;
+
+		try {
+			await handleToggle2FA();
+		} catch (error: unknown) {
+			console.error('Failed to toggle 2FA:', error);
+		} finally {
+			isToggling2FA = false;
+		}
 	}
 </script>
 
@@ -91,11 +107,17 @@
 				<button
 					id="mfa-toggle-btn"
 					type="button"
-					onclick={handleToggle2FA}
-					class="mt-3 sm:mt-0 flex items-center text-indigo-600 hover:text-indigo-500 transition focus:outline-none cursor-pointer"
+					onclick={handleToggle2FAClick}
+					disabled={isToggling2FA}
+					class={`mt-3 sm:mt-0 flex items-center text-indigo-600 hover:text-indigo-500 transition focus:outline-none ${
+						isToggling2FA ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+					}`}
 					aria-label="Toggle two-factor authentication"
+					aria-busy={isToggling2FA}
 				>
-					{#if twoFactor}
+					{#if isToggling2FA}
+						<RefreshCw class="h-8 w-8 animate-spin text-indigo-500 dark:text-indigo-400" />
+					{:else if twoFactor}
 						<ToggleRight class="h-9 w-9 text-indigo-600 dark:text-indigo-400" />
 					{:else}
 						<ToggleLeft class="h-9 w-9 text-slate-300 dark:text-slate-700" />
