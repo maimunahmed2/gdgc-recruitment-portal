@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { GraduationCap, Moon, Sun } from '@lucide/svelte';
+	import { GraduationCap } from '@lucide/svelte';
 	import { onMount } from 'svelte';
 	import { fade, fly } from 'svelte/transition';
 
@@ -186,7 +186,7 @@
 					<span>Server: Audited Sandbox Online</span>
 				</div>
 
-				<button
+				<!-- <button
 					id="navbar-theme-toggle"
 					onclick={() => handleSetDarkMode(!darkMode)}
 					class="p-1.5 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-900 rounded-lg transition cursor-pointer"
@@ -197,7 +197,7 @@
 					{:else}
 						<Moon class="h-4 w-4 text-amber-400" />
 					{/if}
-				</button>
+				</button> -->
 			</div>
 		</header>
 

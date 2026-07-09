@@ -4,10 +4,8 @@
 		GraduationCap,
 		LayoutDashboard,
 		LogOut,
-		Moon,
 		Shield,
-		ShieldAlert,
-		Sun
+		ShieldAlert
 	} from '@lucide/svelte';
 	import { onMount } from 'svelte';
 	import { fly } from 'svelte/transition';
@@ -530,7 +528,7 @@
 					<span class="font-semibold">{formatTime(sessionSecondsLeft)}</span>
 				</div>
 
-				<button
+				<!-- <button
 					id="header-theme-toggle"
 					type="button"
 					onclick={() => setDarkMode(!darkMode)}
@@ -542,7 +540,7 @@
 					{:else}
 						<Moon class="h-4 w-4 text-amber-400" />
 					{/if}
-				</button>
+				</button> -->
 
 				<button
 					id="header-logout-btn"
