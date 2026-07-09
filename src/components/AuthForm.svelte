@@ -691,14 +691,14 @@
 							<div class="w-full border-t border-slate-100 dark:border-slate-800"></div>
 						</div>
 
-						<!-- <div class="relative flex justify-center text-[10px] uppercase">
+						<div class="relative flex justify-center text-[10px] uppercase">
 							<span class="bg-white dark:bg-slate-900 px-3 font-bold text-slate-400 select-none">
 								or continue with
 							</span>
-						</div> -->
+						</div>
 					</div>
 
-					<!-- <div class="grid grid-cols-2 gap-3 pb-2">
+					<div class="grid grid-cols-2 gap-3 pb-2">
 						<button
 							id="google-login-btn"
 							type="button"
@@ -757,7 +757,7 @@
 
 							<span>GitHub</span>
 						</button>
-					</div> -->
+					</div>
 
 					<div class="pt-4 text-center border-t border-slate-100 dark:border-slate-800/80">
 						<span class="text-xs text-slate-500 dark:text-slate-400">
