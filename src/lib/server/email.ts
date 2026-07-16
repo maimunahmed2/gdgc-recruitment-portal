@@ -1,51 +1,112 @@
 import { env } from '$env/dynamic/private';
-import type { SimulatedEmail } from '$lib/types';
 import nodemailer from 'nodemailer';
+import type { SimulatedEmail } from '../../types';
 import { readEmails, writeEmails } from './db';
 
 export function hasSmtpConfig() {
   return !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS);
 }
 
-export async function sendRealEmail(to: string, subject: string, html: string) {
-  const host = env.SMTP_HOST;
-  const port = env.SMTP_PORT ? Number.parseInt(env.SMTP_PORT, 10) : 587;
-  const secure = env.SMTP_SECURE === 'true';
-  const user = env.SMTP_USER;
-  const pass = env.SMTP_PASS;
-  const from = env.SMTP_FROM || user || 'GDGC Recruitment Portal <noreply@gmail.com>';
+export async function sendRealEmail(
+	to: string,
+	subject: string,
+	html: string
+): Promise<void> {
+	const host = env.SMTP_HOST?.trim();
+	const port = env.SMTP_PORT
+		? Number.parseInt(env.SMTP_PORT, 10)
+		: 587;
 
-  if (!host || !user || !pass) {
-    console.log('------------------------------------------------------------');
-    console.log('📬 REAL-TIME EMAIL DISPATCH (SIMULATION ONLY)');
-    console.log(`To: ${to}`);
-    console.log(`Subject: ${subject}`);
-    console.log('SMTP environment variables are not fully configured.');
-    console.log('The email is available inside the simulator inbox.');
-    console.log('------------------------------------------------------------');
-    return;
-  }
+	const secure = env.SMTP_SECURE === 'true';
+	const user = env.SMTP_USER?.trim();
+	const pass = env.SMTP_PASS?.trim();
 
-  const transporter = nodemailer.createTransport({
-    host,
-    port,
-    secure,
-    auth: { user, pass }
-  });
+	if (!host || !user || !pass) {
+		console.error('SMTP configuration is incomplete:', {
+			hasHost: Boolean(host),
+			hasUser: Boolean(user),
+			hasPassword: Boolean(pass),
+			port,
+			secure
+		});
 
-  await transporter.sendMail({ from, to, subject, html });
+		throw new Error(
+			'SMTP environment variables are not fully configured'
+		);
+	}
+
+	if (Number.isNaN(port)) {
+		throw new Error('SMTP_PORT must be a valid number');
+	}
+
+	const from =
+		env.SMTP_FROM?.trim() ||
+		`"GDGC Recruitment Portal" <${user}>`;
+
+	const transporter = nodemailer.createTransport({
+		host,
+		port,
+		secure,
+		auth: {
+			user,
+			pass
+		}
+	});
+
+	/*
+	 * Keep this while debugging.
+	 * It checks the SMTP connection and authentication without
+	 * sending a message.
+	 */
+	await transporter.verify();
+
+	console.log('SMTP connection verified successfully');
+
+	const info = await transporter.sendMail({
+		from,
+		to,
+		subject,
+		html
+	});
+
+	console.log('SMTP send result:', {
+		messageId: info.messageId,
+		accepted: info.accepted,
+		rejected: info.rejected,
+		response: info.response
+	});
+
+	if (!info.accepted?.length) {
+		throw new Error(
+			`SMTP server did not accept the recipient: ${to}`
+		);
+	}
+
+	if (info.rejected?.length) {
+		console.warn('Rejected SMTP recipients:', info.rejected);
+	}
 }
 
-export async function sendEmail(simulatedEmail: SimulatedEmail) {
-  const emails = await readEmails();
+export async function sendEmail(
+	simulatedEmail: SimulatedEmail
+): Promise<void> {
+	const emails = await readEmails();
 
-  emails.unshift(simulatedEmail);
+	if (!Array.isArray(emails)) {
+		throw new Error(
+			'readEmails() did not return an array'
+		);
+	}
 
-  await writeEmails(emails);
+	emails.unshift(simulatedEmail);
+	await writeEmails(emails);
 
-  sendRealEmail(simulatedEmail.to, simulatedEmail.subject, simulatedEmail.body).catch((error) => {
-    console.error('Error in sendRealEmail background task:', error);
-  });
+	// Wait until the SMTP operation completes.
+	await sendRealEmail(
+		simulatedEmail.to,
+		simulatedEmail.subject,
+		simulatedEmail.body
+	);
 }
 
 export function buildVerificationEmail(to: string, name: string, code: string): SimulatedEmail {

@@ -4,17 +4,20 @@
 		BarChart3,
 		Globe,
 		KeyRound,
+		Laptop,
 		MapPin,
 		RefreshCw,
+		Server,
 		ShieldCheck,
 		ToggleLeft,
 		ToggleRight
 	} from '@lucide/svelte';
+	import { onMount } from 'svelte';
 	import { fly } from 'svelte/transition';
 
 	import type { ActivityLog, User } from '../types';
 
-	interface PasswordStrength {
+	type PasswordStrength = {
 		score: number;
 		label: string;
 		color: string;
@@ -23,9 +26,18 @@
 		hasLower?: boolean;
 		hasNumber?: boolean;
 		hasSpecial?: boolean;
-	}
+	};
 
-	interface SecurityCenterProps {
+	type GeoData = {
+		ip?: string;
+		city?: string;
+		region?: string;
+		country?: string;
+		org?: string;
+		loading: boolean;
+	};
+
+	type Props = {
 		user: User;
 		logs: ActivityLog[];
 		twoFactor: boolean;
@@ -37,12 +49,13 @@
 		pwdError: string | null;
 		pwdSuccess: string | null;
 		isUpdatingPwd: boolean;
-		handlePasswordUpdate: (event: SubmitEvent) => void;
-		fetchLogs: () => void;
+		handlePasswordUpdate: (event: SubmitEvent) => void | Promise<void>;
+		fetchLogs: () => void | Promise<void>;
 		passwordStrength: PasswordStrength;
-	}
+	};
 
 	let {
+		user: _user,
 		logs,
 		twoFactor,
 		handleToggle2FA,
@@ -56,50 +69,171 @@
 		handlePasswordUpdate,
 		fetchLogs,
 		passwordStrength
-	}: SecurityCenterProps = $props();
+	}: Props = $props();
 
+	let geoData = $state<GeoData>({ loading: true });
+	let currentDomain = $state('Unknown host');
+	let detectedBrowserOs = $state('Unknown Browser on Unknown OS');
+	let isRefreshingLogs = $state(false);
 	let isToggling2FA = $state(false);
 
-	function getInputValue(event: Event) {
-		return (event.currentTarget as HTMLInputElement).value;
+	function getReadableDevice(userAgent: string): string {
+		let operatingSystem = 'Unknown OS';
+		let browser = 'Unknown Browser';
+
+		// Check mobile operating systems before generic Linux/macOS.
+		if (/android/i.test(userAgent)) {
+			operatingSystem = 'Android';
+		} else if (/iphone|ipad|ipod/i.test(userAgent)) {
+			operatingSystem = 'iOS';
+		} else if (/windows/i.test(userAgent)) {
+			operatingSystem = 'Windows';
+		} else if (/macintosh|mac os x/i.test(userAgent)) {
+			operatingSystem = 'macOS';
+		} else if (/linux/i.test(userAgent)) {
+			operatingSystem = 'Linux';
+		}
+
+		// Edge must be checked before Chrome.
+		if (/edg|edge/i.test(userAgent)) {
+			browser = 'Edge';
+		} else if (/firefox|fxios/i.test(userAgent)) {
+			browser = 'Firefox';
+		} else if (/chrome|crios/i.test(userAgent)) {
+			browser = 'Chrome';
+		} else if (/safari/i.test(userAgent) && !/chrome|crios|android/i.test(userAgent)) {
+			browser = 'Safari';
+		}
+
+		return `${browser} on ${operatingSystem}`;
 	}
 
-	async function handleToggle2FAClick() {
+	function formatLogType(type: string): string {
+		return type.toUpperCase().replace(/_/g, ' ');
+	}
+
+	function formatLogTime(value: string | Date): string {
+		return new Date(value).toLocaleTimeString([], {
+			hour: '2-digit',
+			minute: '2-digit',
+			second: '2-digit'
+		});
+	}
+
+	async function loadGeoData(signal: AbortSignal): Promise<void> {
+		try {
+			const response = await fetch('https://ipapi.co/json/', { signal });
+
+			if (!response.ok) {
+				throw new Error('IP service request failed');
+			}
+
+			const data = (await response.json()) as {
+				ip?: string;
+				city?: string;
+				region?: string;
+				country_name?: string;
+				org?: string;
+			};
+
+			geoData = {
+				ip: data.ip,
+				city: data.city,
+				region: data.region,
+				country: data.country_name,
+				org: data.org,
+				loading: false
+			};
+		} catch (error) {
+			if (error instanceof DOMException && error.name === 'AbortError') {
+				return;
+			}
+
+			/*
+			 * The free ip-api.com endpoint may be blocked on HTTPS
+			 * pages, so keep a graceful fallback instead.
+			 */
+			geoData = { loading: false };
+		}
+	}
+
+	async function toggleTwoFactor(): Promise<void> {
 		if (isToggling2FA) return;
 
 		isToggling2FA = true;
 
 		try {
 			await handleToggle2FA();
-		} catch (error: unknown) {
-			console.error('Failed to toggle 2FA:', error);
 		} finally {
 			isToggling2FA = false;
 		}
 	}
+
+	async function refreshLogs(): Promise<void> {
+		if (isRefreshingLogs) return;
+
+		isRefreshingLogs = true;
+
+		try {
+			await fetchLogs();
+		} finally {
+			isRefreshingLogs = false;
+		}
+	}
+
+	let fallbackIp = $derived(logs.length > 0 ? logs[0].ip : '127.0.0.1');
+
+	let displayIp = $derived(geoData.ip ?? fallbackIp);
+
+	let displayLocation = $derived.by(() => {
+		if (geoData.loading) {
+			return 'Resolving Secure Location...';
+		}
+
+		if (!geoData.city) {
+			return 'Audited Container Route';
+		}
+
+		const region = geoData.region ? `${geoData.region}, ` : '';
+
+		return `${geoData.city}, ${region}${geoData.country ?? ''}`;
+	});
+
+	onMount(() => {
+		currentDomain = window.location.host;
+		detectedBrowserOs = getReadableDevice(window.navigator.userAgent);
+
+		const controller = new AbortController();
+		void loadGeoData(controller.signal);
+
+		return () => {
+			controller.abort();
+		};
+	});
 </script>
 
 <div
 	id="tab-content-security"
-	in:fly={{ y: 10, duration: 200 }}
-	class="grid grid-cols-1 lg:grid-cols-3 gap-6"
+	in:fly={{ y: 10, opacity: 0, duration: 200 }}
+	class="grid grid-cols-1 gap-6 lg:grid-cols-3"
 >
-	<!-- Left / Middle: 2FA & Password Management -->
-	<div class="lg:col-span-2 space-y-6">
-		<!-- MFA Panel -->
+	<!-- Main security controls -->
+	<div class="space-y-6 lg:col-span-2">
+		<!-- Two-factor authentication -->
 		<div
-			class="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-all duration-300"
+			class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-all duration-300 dark:border-slate-800 dark:bg-slate-900"
 		>
-			<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4">
+			<div class="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between">
 				<div>
 					<h3
-						class="text-base font-bold text-slate-800 dark:text-white flex items-center gap-2 font-display"
+						class="font-display flex items-center gap-2 text-base font-bold text-slate-800 dark:text-white"
 					>
-						<ShieldCheck class="h-5 w-5 text-indigo-500 shrink-0" />
-						<span>Two-Factor Authentication (2FA)</span>
+						<ShieldCheck class="h-5 w-5 shrink-0 text-indigo-500" />
+
+						<span> Two-Factor Authentication (2FA) </span>
 					</h3>
 
-					<p class="text-xs text-slate-400 dark:text-slate-400 mt-1 font-medium">
+					<p class="mt-1 text-xs font-medium text-slate-400">
 						Require an OTP sent to your mailbox for security audits upon logging in.
 					</p>
 				</div>
@@ -107,16 +241,16 @@
 				<button
 					id="mfa-toggle-btn"
 					type="button"
-					onclick={handleToggle2FAClick}
+					onclick={() => void toggleTwoFactor()}
 					disabled={isToggling2FA}
-					class={`mt-3 sm:mt-0 flex items-center text-indigo-600 hover:text-indigo-500 transition focus:outline-none ${
-						isToggling2FA ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-					}`}
-					aria-label="Toggle two-factor authentication"
-					aria-busy={isToggling2FA}
+					class="mt-3 flex cursor-pointer items-center text-indigo-600 transition hover:text-indigo-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 sm:mt-0"
+					aria-label={twoFactor
+						? 'Disable two-factor authentication'
+						: 'Enable two-factor authentication'}
+					aria-pressed={twoFactor}
 				>
 					{#if isToggling2FA}
-						<RefreshCw class="h-8 w-8 animate-spin text-indigo-500 dark:text-indigo-400" />
+						<RefreshCw class="h-7 w-7 animate-spin text-indigo-500" />
 					{:else if twoFactor}
 						<ToggleRight class="h-9 w-9 text-indigo-600 dark:text-indigo-400" />
 					{:else}
@@ -126,11 +260,11 @@
 			</div>
 
 			<div
-				class="p-3.5 bg-slate-50 dark:bg-slate-950/40 border border-slate-200/40 dark:border-slate-800/80 rounded-xl text-xs flex items-start space-x-2.5"
+				class="flex items-start space-x-2.5 rounded-xl border border-slate-200/40 bg-slate-50 p-3.5 text-xs dark:border-slate-800/80 dark:bg-slate-950/40"
 			>
-				<AlertCircle class="h-4 w-4 text-indigo-500 shrink-0 mt-0.5" />
+				<AlertCircle class="mt-0.5 h-4 w-4 shrink-0 text-indigo-500" />
 
-				<span class="text-slate-500 dark:text-slate-400 leading-normal font-medium">
+				<span class="leading-normal font-medium text-slate-500 dark:text-slate-400">
 					{twoFactor
 						? '2FA is active. Every candidate dashboard entry is strictly audited for secure device configurations.'
 						: '2FA is currently disabled. We strongly suggest activating MFA to secure your GDGC recruitment portfolio details.'}
@@ -138,21 +272,23 @@
 			</div>
 		</div>
 
-		<!-- Password Update Card -->
+		<!-- Password update -->
 		<div
-			class="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-all duration-300"
+			class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-all duration-300 dark:border-slate-800 dark:bg-slate-900"
 		>
 			<h3
-				class="text-base font-bold text-slate-800 dark:text-white mb-4 flex items-center gap-2 font-display"
+				class="font-display mb-4 flex items-center gap-2 text-base font-bold text-slate-800 dark:text-white"
 			>
-				<KeyRound class="h-5 w-5 text-indigo-500 shrink-0" />
+				<KeyRound class="h-5 w-5 shrink-0 text-indigo-500" />
+
 				<span>Update Security Credentials</span>
 			</h3>
 
 			{#if pwdError}
 				<div
 					id="pwd-error-msg"
-					class="mb-4 p-3.5 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/30 text-red-600 dark:text-red-400 text-xs rounded-xl font-medium"
+					in:fly={{ y: -6, opacity: 0, duration: 150 }}
+					class="mb-4 rounded-xl border border-red-200 bg-red-50 p-3.5 text-xs font-medium text-red-600 dark:border-red-900/30 dark:bg-red-950/20 dark:text-red-400"
 				>
 					{pwdError}
 				</div>
@@ -161,18 +297,19 @@
 			{#if pwdSuccess}
 				<div
 					id="pwd-success-msg"
-					class="mb-4 p-3.5 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/30 text-emerald-600 dark:text-emerald-400 text-xs rounded-xl font-medium"
+					in:fly={{ y: -6, opacity: 0, duration: 150 }}
+					class="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3.5 text-xs font-medium text-emerald-600 dark:border-emerald-900/30 dark:bg-emerald-950/20 dark:text-emerald-400"
 				>
 					{pwdSuccess}
 				</div>
 			{/if}
 
-			<form onsubmit={handlePasswordUpdate} class="space-y-4">
-				<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+			<form onsubmit={(event) => void handlePasswordUpdate(event)} class="space-y-4">
+				<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
 					<div>
 						<label
 							for="current-password-input"
-							class="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider"
+							class="mb-1.5 block text-xs font-bold tracking-wider text-slate-500 uppercase dark:text-slate-400"
 						>
 							Current Password
 						</label>
@@ -181,16 +318,17 @@
 							id="current-password-input"
 							type="password"
 							value={currentPassword}
-							oninput={(event) => setCurrentPassword(getInputValue(event))}
+							oninput={(event) => setCurrentPassword(event.currentTarget.value)}
 							placeholder="••••••••"
-							class="w-full px-3.5 py-2 text-sm bg-slate-50 dark:bg-slate-950/60 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-mono"
+							autocomplete="current-password"
+							class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 font-mono text-sm text-slate-900 transition-all focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-100"
 						/>
 					</div>
 
 					<div>
 						<label
 							for="new-password-input"
-							class="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider"
+							class="mb-1.5 block text-xs font-bold tracking-wider text-slate-500 uppercase dark:text-slate-400"
 						>
 							New Secure Password
 						</label>
@@ -199,9 +337,10 @@
 							id="new-password-input"
 							type="password"
 							value={newPassword}
-							oninput={(event) => setNewPassword(getInputValue(event))}
+							oninput={(event) => setNewPassword(event.currentTarget.value)}
 							placeholder="••••••••"
-							class="w-full px-3.5 py-2 text-sm bg-slate-50 dark:bg-slate-950/60 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-mono"
+							autocomplete="new-password"
+							class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 font-mono text-sm text-slate-900 transition-all focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-100"
 						/>
 					</div>
 				</div>
@@ -209,21 +348,23 @@
 				{#if newPassword.length > 0}
 					<div
 						id="password-strength-container"
-						class="p-3 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200/40 dark:border-slate-800/80"
+						class="rounded-xl border border-slate-200/40 bg-slate-50 p-3 dark:border-slate-800/80 dark:bg-slate-950"
 					>
-						<div class="flex justify-between items-center text-[11px] mb-1.5">
-							<span class="font-semibold text-slate-400">Password Strength:</span>
+						<div class="mb-1.5 flex items-center justify-between text-[11px]">
+							<span class="font-semibold text-slate-400"> Password Strength: </span>
 
 							<span class="font-bold text-slate-700 dark:text-slate-200">
-								{passwordStrength?.label || 'Checking...'}
+								{passwordStrength?.label ?? 'Checking...'}
 							</span>
 						</div>
 
-						<div class="h-1.5 w-full bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+						<div class="h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
 							<div
 								id="password-strength-bar"
-								class={`h-full ${passwordStrength?.color || 'bg-slate-400'} transition-all duration-300`}
-								style={`width: ${passwordStrength?.score || 0}%`}
+								class={`h-full ${
+									passwordStrength?.color ?? 'bg-slate-400'
+								} transition-all duration-300`}
+								style:width={`${passwordStrength?.score ?? 0}%`}
 							></div>
 						</div>
 					</div>
@@ -233,78 +374,81 @@
 					id="pwd-update-submit"
 					type="submit"
 					disabled={isUpdatingPwd}
-					class="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-bold rounded-xl text-xs shadow-md transition-all cursor-pointer"
+					class="cursor-pointer rounded-xl bg-indigo-600 px-5 py-2 text-xs font-bold text-white shadow-md transition-all hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-indigo-400"
 				>
 					{isUpdatingPwd ? 'Updating Security Hashes...' : 'Apply New Password'}
 				</button>
 			</form>
 		</div>
 
-		<!-- User Activity Logs List -->
+		<!-- Activity logs -->
 		<div
-			class="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-all duration-300"
+			class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-all duration-300 dark:border-slate-800 dark:bg-slate-900"
 		>
-			<div class="flex items-center justify-between mb-4">
+			<div class="mb-4 flex items-center justify-between">
 				<h3
-					class="text-base font-bold text-slate-800 dark:text-white flex items-center gap-2 font-display"
+					class="font-display flex items-center gap-2 text-base font-bold text-slate-800 dark:text-white"
 				>
-					<BarChart3 class="h-5 w-5 text-indigo-500 shrink-0" />
-					<span>My Active Sessions & Activity Logs</span>
+					<BarChart3 class="h-5 w-5 shrink-0 text-indigo-500" />
+
+					<span> My Active Sessions & Activity Logs </span>
 				</h3>
 
 				<button
 					id="refresh-logs-btn"
 					type="button"
-					onclick={fetchLogs}
-					class="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer"
+					onclick={() => void refreshLogs()}
+					disabled={isRefreshingLogs}
+					class="cursor-pointer rounded-xl p-1.5 text-slate-400 transition-all hover:bg-slate-100 hover:text-slate-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-slate-800 dark:hover:text-slate-200"
 					title="Reload Logs"
+					aria-label="Reload activity logs"
 				>
-					<RefreshCw class="h-4 w-4" />
+					<RefreshCw class={`h-4 w-4 ${isRefreshingLogs ? 'animate-spin' : ''}`} />
 				</button>
 			</div>
 
 			{#if logs.length === 0}
-				<div class="text-center p-8 text-slate-400 dark:text-slate-600 text-xs font-medium">
+				<div class="p-8 text-center text-xs font-medium text-slate-400 dark:text-slate-600">
 					No logs recorded yet.
 				</div>
 			{:else}
 				<div class="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
-					<table class="w-full text-left border-collapse">
+					<table class="w-full border-collapse text-left">
 						<thead>
 							<tr
-								class="bg-slate-50 dark:bg-slate-950 text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider border-b border-slate-200 dark:border-slate-800"
+								class="border-b border-slate-200 bg-slate-50 text-[11px] font-bold tracking-wider text-slate-500 uppercase dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400"
 							>
-								<th class="py-3 px-4">Event</th>
-								<th class="py-3 px-4">Status</th>
-								<th class="py-3 px-4">Browser/Device</th>
-								<th class="py-3 px-4">IP Address</th>
-								<th class="py-3 px-4 text-right">Timestamp</th>
+								<th class="px-4 py-3">Event</th>
+								<th class="px-4 py-3">Status</th>
+								<th class="px-4 py-3"> Browser/Device </th>
+								<th class="px-4 py-3"> IP Address </th>
+								<th class="px-4 py-3 text-right"> Timestamp </th>
 							</tr>
 						</thead>
 
 						<tbody
-							class="text-xs divide-y divide-slate-100 dark:divide-slate-800/60 text-slate-600 dark:text-slate-300"
+							class="divide-y divide-slate-100 text-xs text-slate-600 dark:divide-slate-800/60 dark:text-slate-300"
 						>
-							{#each logs.slice(0, 10) as log (log.id)}
-								<tr class="hover:bg-indigo-50/20 dark:hover:bg-indigo-950/10 transition-colors">
-									<td class="py-3 px-4 font-bold">
+							{#each logs.slice(0, 10) as log (log.id ?? `${log.timestamp}-${log.type}-${log.ip}`)}
+								<tr class="transition-colors hover:bg-indigo-50/20 dark:hover:bg-indigo-950/10">
+									<td class="px-4 py-3 font-bold">
 										<span class="text-slate-800 dark:text-slate-200">
-											{log.type.toUpperCase().replace(/_/g, ' ')}
+											{formatLogType(log.type)}
 										</span>
 
 										{#if log.details}
-											<span class="block text-[10px] text-slate-400 font-normal mt-0.5">
+											<span class="mt-0.5 block text-[10px] font-normal text-slate-400">
 												{log.details}
 											</span>
 										{/if}
 									</td>
 
-									<td class="py-3 px-4">
+									<td class="px-4 py-3">
 										<span
-											class={`px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${
+											class={`rounded-full border px-2 py-0.5 text-[10px] font-extrabold ${
 												log.status === 'success'
-													? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/20'
-													: 'bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 border-red-200 dark:border-red-900/20'
+													? 'border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-900/20 dark:bg-emerald-950/30 dark:text-emerald-400'
+													: 'border-red-200 bg-red-50 text-red-600 dark:border-red-900/20 dark:bg-red-950/30 dark:text-red-400'
 											}`}
 										>
 											{log.status.toUpperCase()}
@@ -312,22 +456,18 @@
 									</td>
 
 									<td
-										class="py-3 px-4 font-mono text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-[150px]"
+										class="max-w-[150px] truncate px-4 py-3 font-mono text-[11px] text-slate-500 dark:text-slate-400"
 										title={log.userAgent}
 									>
 										{log.userAgent}
 									</td>
 
-									<td class="py-3 px-4 font-mono text-[11px] text-slate-500">
+									<td class="px-4 py-3 font-mono text-[11px] text-slate-500">
 										{log.ip}
 									</td>
 
-									<td class="py-3 px-4 text-right text-slate-400 font-mono text-[10px]">
-										{new Date(log.timestamp).toLocaleTimeString([], {
-											hour: '2-digit',
-											minute: '2-digit',
-											second: '2-digit'
-										})}
+									<td class="px-4 py-3 text-right font-mono text-[10px] text-slate-400">
+										{formatLogTime(log.timestamp)}
 									</td>
 								</tr>
 							{/each}
@@ -336,60 +476,96 @@
 				</div>
 			{/if}
 
-			<div class="text-[10px] text-slate-400 dark:text-slate-500 font-mono mt-3.5 text-center">
+			<div class="mt-3.5 text-center font-mono text-[10px] text-slate-400 dark:text-slate-500">
 				Security audit logs are cryptographically compiled for candidate privacy.
 			</div>
 		</div>
 	</div>
 
-	<!-- Right Panel: Account Metrics summary -->
+	<!-- Device information -->
 	<div class="space-y-6">
 		<div
-			class="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-all duration-300"
+			class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-all duration-300 dark:border-slate-800 dark:bg-slate-900"
 		>
-			<h3 class="text-xs font-bold uppercase tracking-widest text-slate-400 mb-4">
+			<h3 class="mb-4 text-xs font-bold tracking-widest text-slate-400 uppercase">
 				Device Authorization
 			</h3>
 
 			<div class="space-y-4 text-xs">
 				<div
-					class="p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200/40 dark:border-slate-800/80 rounded-xl flex items-start space-x-3"
+					class="flex items-start space-x-3 rounded-xl border border-slate-200/40 bg-slate-50 p-3 dark:border-slate-800/80 dark:bg-slate-950"
 				>
-					<Globe class="h-4 w-4 text-indigo-500 mt-0.5 shrink-0" />
+					<Globe class="mt-0.5 h-4 w-4 shrink-0 text-indigo-500" />
 
-					<div class="min-w-0">
+					<div class="min-w-0 flex-1">
 						<h4 class="font-bold text-slate-800 dark:text-slate-200">Current Login Domain</h4>
 
-						<p class="text-[10px] text-slate-500 font-mono mt-0.5 truncate">Development Sandbox</p>
+						<p class="mt-0.5 truncate font-mono text-[10px] text-slate-500">
+							{currentDomain}
+						</p>
 					</div>
 				</div>
 
 				<div
-					class="p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200/40 dark:border-slate-800/80 rounded-xl flex items-start space-x-3"
+					class="flex items-start space-x-3 rounded-xl border border-slate-200/40 bg-slate-50 p-3 dark:border-slate-800/80 dark:bg-slate-950"
 				>
-					<MapPin class="h-4 w-4 text-indigo-500 mt-0.5 shrink-0" />
+					<Laptop class="mt-0.5 h-4 w-4 shrink-0 text-indigo-500" />
 
-					<div class="min-w-0">
-						<h4 class="font-bold text-slate-800 dark:text-slate-200">IP Location Bound</h4>
+					<div class="min-w-0 flex-1">
+						<h4 class="font-bold text-slate-800 dark:text-slate-200">Detected Browser & OS</h4>
 
-						<p class="text-[10px] text-slate-500 font-mono mt-0.5 truncate">
-							Audited Virtual Container Routing
+						<p class="mt-0.5 truncate font-mono text-[10px] text-slate-500">
+							{detectedBrowserOs}
 						</p>
+					</div>
+				</div>
+
+				<div
+					class="flex items-start space-x-3 rounded-xl border border-slate-200/40 bg-slate-50 p-3 dark:border-slate-800/80 dark:bg-slate-950"
+				>
+					<Server class="mt-0.5 h-4 w-4 shrink-0 text-indigo-500" />
+
+					<div class="min-w-0 flex-1">
+						<h4 class="font-bold text-slate-800 dark:text-slate-200">Active Node IP</h4>
+
+						<p class="mt-0.5 truncate font-mono text-[10px] text-slate-500">
+							{geoData.loading ? 'Detecting Secure Address...' : displayIp}
+						</p>
+					</div>
+				</div>
+
+				<div
+					class="flex items-start space-x-3 rounded-xl border border-slate-200/40 bg-slate-50 p-3 dark:border-slate-800/80 dark:bg-slate-950"
+				>
+					<MapPin class="mt-0.5 h-4 w-4 shrink-0 text-indigo-500" />
+
+					<div class="min-w-0 flex-1">
+						<h4 class="font-bold text-slate-800 dark:text-slate-200">IP Geolocation Bound</h4>
+
+						<p class="mt-0.5 truncate font-mono text-[10px] text-slate-500">
+							{displayLocation}
+						</p>
+
+						{#if geoData.org}
+							<p class="mt-1 text-[8px] font-bold tracking-wider text-indigo-400 uppercase">
+								{geoData.org}
+							</p>
+						{/if}
 					</div>
 				</div>
 			</div>
 		</div>
 
 		<div
-			class="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-all duration-300"
+			class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-all duration-300 dark:border-slate-800 dark:bg-slate-900"
 		>
-			<h3 class="text-sm font-bold text-slate-800 dark:text-white mb-3 font-display">
+			<h3 class="font-display mb-3 text-sm font-bold text-slate-800 dark:text-white">
 				Remember Me Cookie
 			</h3>
 
-			<p class="text-xs text-slate-400 dark:text-slate-400 leading-relaxed font-medium">
+			<p class="text-xs leading-relaxed font-medium text-slate-400">
 				If selected on login, a secure cryptographic token is saved inside local state, allowing
-				rapid candidate authentication bypass across multiple app refreshes.
+				rapid candidate authentication across multiple app refreshes.
 			</p>
 		</div>
 	</div>

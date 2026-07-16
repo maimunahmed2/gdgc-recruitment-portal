@@ -1,40 +1,84 @@
 import { requireAdmin } from '$lib/server/auth';
-import { readEmails, readLogs, readUsers, seedDatabase } from '$lib/server/db';
+import {
+  readEmails,
+  readLogs,
+  readUsers,
+  seedDatabase
+} from '$lib/server/db';
 import { json, type RequestHandler } from '@sveltejs/kit';
 
 export const GET: RequestHandler = async (event) => {
-  try {
-    await seedDatabase();
-    const auth = requireAdmin(event);
-    if ('response' in auth) return auth.response;
+	try {
+		await seedDatabase();
 
-    const users = await readUsers();
-    const logs = await readLogs();
-    const emails = readEmails();
+		const auth = await requireAdmin(event);
 
-    const totalUsers = users.length;
-    const adminCount = users.filter((user) => user.role === 'admin').length;
-    const verifiedUsers = users.filter((user) => user.isVerified).length;
-    const mfaUsers = users.filter((user) => user.twoFactorEnabled).length;
-    const successfulLogins = logs.filter((log) => log.type === 'login' && log.status === 'success').length;
-    const failedLogins = logs.filter((log) => log.type === 'login' && log.status === 'failed').length;
+		if ('response' in auth) {
+			return auth.response;
+		}
 
-    return json({
-      stats: {
-        totalUsers,
-        adminCount,
-        verifiedUsers,
-        verifiedCount: verifiedUsers,
-        mfaUsers,
-        mfaCount: mfaUsers,
-        totalLogins: successfulLogins,
-        successfulLogins,
-        failedLogins,
-        totalEmailsSent: emails.length,
-        totalActivityLogs: logs.length
-      }
-    });
-  } catch {
-    return json({ error: 'Server error retrieving stats' }, { status: 500 });
-  }
+		const [users, logs, emails] = await Promise.all([
+			readUsers(),
+			readLogs(),
+			readEmails()
+		]);
+
+		const totalUsers = users.length;
+
+		const adminCount = users.filter(
+			(user) => user.role?.toLowerCase() === 'admin'
+		).length;
+
+		const verifiedUsers = users.filter(
+			(user) => user.isVerified
+		).length;
+
+		const mfaUsers = users.filter(
+			(user) => user.twoFactorEnabled
+		).length;
+
+		const successfulLogins = logs.filter(
+			(log) =>
+				log.type === 'login' &&
+				log.status === 'success'
+		).length;
+
+		const failedLogins = logs.filter(
+			(log) =>
+				log.type === 'login' &&
+				log.status === 'failed'
+		).length;
+
+		return json({
+			stats: {
+				totalUsers,
+				adminCount,
+				verifiedUsers,
+				verifiedCount: verifiedUsers,
+				mfaUsers,
+				mfaCount: mfaUsers,
+
+				// Include all login attempts.
+				totalLogins:
+					successfulLogins + failedLogins,
+
+				successfulLogins,
+				failedLogins,
+				totalEmailsSent: emails.length,
+				totalActivityLogs: logs.length
+			}
+		});
+	} catch (error) {
+		console.error(
+			'Error retrieving admin statistics:',
+			error
+		);
+
+		return json(
+			{
+				error: 'Server error retrieving stats'
+			},
+			{ status: 500 }
+		);
+	}
 };

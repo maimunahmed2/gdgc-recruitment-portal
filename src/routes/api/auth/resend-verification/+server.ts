@@ -26,7 +26,7 @@ export const POST: RequestHandler = async (event) => {
     await writeUsers(users);
 
     await logActivity(event, user.id, user.email, 'email_verify_request', 'success', 'Verification code resent');
-    sendEmail(buildVerificationEmail(email, user.name, verificationCode));
+    await sendEmail(buildVerificationEmail(email, user.name, verificationCode));
 
     return json({
       message: 'Verification email resent successfully',

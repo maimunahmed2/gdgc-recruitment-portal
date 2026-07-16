@@ -37,7 +37,7 @@ export const POST: RequestHandler = async (event) => {
       await writeUsers(users);
 
       await logActivity(event, user.id, user.email, 'two_factor_toggle', 'success', 'Two-Factor challenge initiated during login');
-      sendEmail(buildTwoFactorEmail(user.email, user.name, twoFactorCode));
+      await sendEmail(buildTwoFactorEmail(user.email, user.name, twoFactorCode));
 
       return json({
         mfaRequired: true,

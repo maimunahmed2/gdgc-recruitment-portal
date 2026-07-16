@@ -60,7 +60,7 @@ export const POST: RequestHandler = async (event) => {
     await writeUsers(users);
 
     await logActivity(event, newUser.id, email, 'register', 'success', 'User registered successfully');
-    sendEmail(buildVerificationEmail(email, name.trim(), verificationCode));
+    await sendEmail(buildVerificationEmail(email, name.trim(), verificationCode));
 
     return json(
       {

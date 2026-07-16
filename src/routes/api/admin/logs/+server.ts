@@ -1,10 +1,28 @@
-import { json, type RequestHandler } from '@sveltejs/kit';
 import { requireAdmin } from '$lib/server/auth';
 import { readLogs } from '$lib/server/db';
+import { json, type RequestHandler } from '@sveltejs/kit';
 
 export const GET: RequestHandler = async (event) => {
-  const auth = requireAdmin(event);
-  if ('response' in auth) return auth.response;
+	try {
+		const auth = await requireAdmin(event);
 
-  return json({ logs: readLogs() });
+		if ('response' in auth) {
+			return auth.response;
+		}
+
+		const logs = await readLogs();
+
+		return json({
+			logs: Array.isArray(logs) ? logs : []
+		});
+	} catch (error) {
+		console.error('Error retrieving admin logs:', error);
+
+		return json(
+			{
+				error: 'Server error retrieving admin logs'
+			},
+			{ status: 500 }
+		);
+	}
 };
