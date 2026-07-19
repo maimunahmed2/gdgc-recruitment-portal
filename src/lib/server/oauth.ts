@@ -1,183 +1,161 @@
-import { env } from '$env/dynamic/private';
-import type { RequestEvent } from '@sveltejs/kit';
 import bcrypt from 'bcryptjs';
+import { randomUUID } from 'node:crypto';
+import type { RequestEvent } from '@sveltejs/kit';
+
 import type { UserWithPassword } from '../../types';
 import { logActivity } from './activity';
-import { createToken } from './auth';
+import { createAccessToken, normalizeEmail } from './auth';
 import { readUsers, toSafeUser, writeUsers } from './db';
 
-function escapeForScript(value: string) {
-	return value
-		.replace(/\\/g, '\\\\')
-		.replace(/`/g, '\\`')
-		.replace(/\$/g, '\\$')
-		.replace(/"/g, '\\"');
+function htmlResponse(markup: string, status = 200): Response {
+	return new Response(markup, {
+		status,
+		headers: { 'Content-Type': 'text/html; charset=utf-8' }
+	});
 }
 
-export async function oauthResponseHtml(
+function safeJson(value: unknown): string {
+	return JSON.stringify(value).replace(/</g, '\\u003c');
+}
+
+function popupHtml(payload: unknown, message: string): string {
+	return `<!doctype html>
+	<html>
+		<head><meta charset="utf-8"><title>GDGC Authentication</title></head>
+		<body style="font-family:Arial,sans-serif;display:grid;place-items:center;min-height:100vh;background:#f8fafc">
+			<div style="padding:24px;background:white;border:1px solid #e2e8f0;border-radius:16px;box-shadow:0 10px 30px rgba(15,23,42,.1);text-align:center;max-width:360px">
+				<h2>${message}</h2>
+				<p>This window should close automatically.</p>
+			</div>
+			<script>
+				const payload = ${safeJson(payload)};
+				if (window.opener) {
+					window.opener.postMessage(payload, window.location.origin);
+					window.close();
+				} else {
+					window.location.href = '/';
+				}
+			</script>
+		</body>
+	</html>`;
+}
+
+export async function completeOAuth(
 	event: RequestEvent,
-	email: string,
-	name: string,
+	emailValue: string,
+	nameValue: string,
 	provider: 'google' | 'github',
 	errorDetail?: string
-) {
+): Promise<Response> {
 	if (errorDetail) {
-		const safeError = escapeForScript(errorDetail);
+		return htmlResponse(
+			popupHtml(
+				{ type: 'OAUTH_AUTH_FAILURE', error: errorDetail },
+				'Authentication failed'
+			),
+			400
+		);
+	}
 
-		return `
-      <html>
-        <body>
-          <script>
-            if (window.opener) {
-              window.opener.postMessage({ type: 'OAUTH_AUTH_FAILURE', error: "${safeError}" }, '*');
-              window.close();
-            } else {
-              window.location.href = '/?error=${encodeURIComponent(errorDetail)}';
-            }
-          </script>
-          <p>Authentication failed: ${errorDetail}. This window should close automatically.</p>
-        </body>
-      </html>
-    `;
+	const email = normalizeEmail(emailValue);
+	const name = nameValue.trim() || `${provider === 'google' ? 'Google' : 'GitHub'} User`;
+	if (!email) {
+		return htmlResponse(
+			popupHtml(
+				{ type: 'OAUTH_AUTH_FAILURE', error: 'OAuth provider did not return an email address' },
+				'Authentication failed'
+			),
+			400
+		);
 	}
 
 	const users = await readUsers();
-	let user = users.find((item) => item.email.toLowerCase() === email.toLowerCase());
+	let user = users.find((item) => normalizeEmail(item.email) === email);
 	const providerLabel = provider === 'google' ? 'Google' : 'GitHub';
 
 	if (!user) {
-		const newUser: UserWithPassword = {
-			id: `usr_${Math.random().toString(36).substring(2, 11)}`,
+		user = {
+			id: `usr_${randomUUID()}`,
 			name,
-			email: email.toLowerCase(),
+			email,
 			role: 'user',
 			isVerified: true,
 			createdAt: new Date().toISOString(),
-			passwordHash: bcrypt.hashSync(Math.random().toString(36), 10)
-		};
+			passwordHash: await bcrypt.hash(randomUUID(), 10),
+			twoFactorEnabled: false
+		} satisfies UserWithPassword;
 
-		users.push(newUser);
+		users.push(user);
 		await writeUsers(users);
-
-		user = newUser;
-
-		await logActivity(
-			event,
-			user.id,
-			email,
-			'register',
-			'success',
-			`Signed up via ${providerLabel} OAuth`
-		);
+		await logActivity(event, user.id, user.email, 'register', 'success', `Signed up via ${providerLabel} OAuth`);
 	} else {
 		if (!user.isVerified) {
 			user.isVerified = true;
 			await writeUsers(users);
 		}
-
-		await logActivity(
-			event,
-			user.id,
-			email,
-			'login',
-			'success',
-			`Logged in via ${providerLabel} OAuth`
-		);
+		await logActivity(event, user.id, user.email, 'login', 'success', `Logged in via ${providerLabel} OAuth`);
 	}
 
-	const token = createToken(
-		{
-			id: user.id,
-			email: user.email,
-			role: user.role,
-			isVerified: user.isVerified
-		},
-		'1h'
+	const token = createAccessToken(user);
+	return htmlResponse(
+		popupHtml(
+			{ type: 'OAUTH_AUTH_SUCCESS', token, user: toSafeUser(user) },
+			'Authentication successful'
+		)
 	);
-
-	const safeUser = toSafeUser(user);
-
-	return `
-    <html>
-      <head>
-        <title>GDGC Authentication Portal</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-      </head>
-
-      <body class="bg-slate-50 dark:bg-slate-950 font-sans flex items-center justify-center min-h-screen">
-        <div class="text-center p-6 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-xl shadow-xl max-w-sm w-full mx-4">
-          <div class="h-12 w-12 bg-emerald-50 dark:bg-emerald-950/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-emerald-100">
-            <svg class="h-6 w-6 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
-
-          <h2 class="text-lg font-bold text-slate-900 dark:text-white mb-2">Auth Success!</h2>
-
-          <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">
-            Directing secure session. This window will close automatically...
-          </p>
-
-          <script>
-            setTimeout(() => {
-              if (window.opener) {
-                window.opener.postMessage({
-                  type: 'OAUTH_AUTH_SUCCESS',
-                  token: '${token}',
-                  user: ${JSON.stringify(safeUser)}
-                }, '*');
-
-                window.close();
-              } else {
-                window.location.href = '/';
-              }
-            }, 1000);
-          </script>
-        </div>
-      </body>
-    </html>
-  `;
 }
 
-export function getOAuthRedirectUri(event: RequestEvent, provider: string) {
-	return `${event.url.origin}/auth/callback/${provider}`;
-}
+export function oauthSimulatorHtml(url: URL): string {
+	const provider = url.searchParams.get('provider') === 'github' ? 'github' : 'google';
+	const redirectUri = url.searchParams.get('redirect_uri') ?? '';
+	const state = url.searchParams.get('state') ?? '';
 
-export function getOAuthUrl(event: RequestEvent, provider: string) {
-	const redirectUri = getOAuthRedirectUri(event, provider);
-
-	if (provider === 'google' && env.GOOGLE_CLIENT_ID) {
-		const params = new URLSearchParams({
-			client_id: env.GOOGLE_CLIENT_ID,
-			redirect_uri: redirectUri,
-			response_type: 'code',
-			scope: 'openid email profile',
-			state: 'google-state-secure-2026',
-			prompt: 'select_account'
-		});
-
-		return {
-			url: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`,
-			simulator: false
-		};
-	}
-
-	if (provider === 'github' && env.GITHUB_CLIENT_ID) {
-		const params = new URLSearchParams({
-			client_id: env.GITHUB_CLIENT_ID,
-			redirect_uri: redirectUri,
-			scope: 'read:user user:email',
-			state: 'github-state-secure-2026'
-		});
-
-		return {
-			url: `https://github.com/login/oauth/authorize?${params.toString()}`,
-			simulator: false
-		};
-	}
-
-	return {
-		url: `/auth/simulator?provider=${provider}&redirect_uri=${encodeURIComponent(redirectUri)}`,
-		simulator: true
-	};
+	return `<!doctype html>
+	<html>
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width,initial-scale=1">
+		<title>GDGC OAuth Simulator</title>
+		<style>
+			body{font-family:Arial,sans-serif;background:#f8fafc;display:grid;place-items:center;min-height:100vh;margin:0;padding:16px;color:#0f172a}
+			.card{width:min(100%,420px);background:white;border:1px solid #e2e8f0;border-radius:18px;box-shadow:0 18px 50px rgba(15,23,42,.12);overflow:hidden}
+			.header{background:#4f46e5;color:white;padding:16px 22px;font-weight:700}.content{padding:24px}.preset,.submit{width:100%;padding:12px;border-radius:10px;margin-top:10px;cursor:pointer}.preset{background:white;border:1px solid #cbd5e1;text-align:left}.submit{background:#4f46e5;color:white;border:0;font-weight:700}input{box-sizing:border-box;width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:9px;margin:5px 0 10px}
+		</style>
+	</head>
+	<body>
+		<div class="card">
+			<div class="header">OAuth Sandbox Simulator · ${provider}</div>
+			<div class="content">
+				<h2>Choose a simulated identity</h2>
+				<button class="preset" onclick="finish('alex.oauth@gdgc.edu','Alex Candidate')"><strong>Alex Candidate</strong><br>alex.oauth@gdgc.edu</button>
+				<button class="preset" onclick="finish('taylor.coder@github.com','Taylor GitHub')"><strong>Taylor GitHub</strong><br>taylor.coder@github.com</button>
+				<hr style="margin:22px 0;border:0;border-top:1px solid #e2e8f0">
+				<label>Name</label><input id="name" placeholder="John Doe">
+				<label>Email</label><input id="email" type="email" placeholder="john@example.com">
+				<button class="submit" onclick="submitCustom()">Authorize simulated credentials</button>
+			</div>
+		</div>
+		<script>
+			const redirectUri = ${safeJson(redirectUri)};
+			const state = ${safeJson(state)};
+			const provider = ${safeJson(provider)};
+			function finish(email,name){
+				if(!redirectUri){alert('Redirect URI is missing');return;}
+				const target = new URL(redirectUri, window.location.origin);
+				target.searchParams.set('mock','true');
+				target.searchParams.set('email',email);
+				target.searchParams.set('name',name);
+				target.searchParams.set('provider',provider);
+				target.searchParams.set('state',state);
+				window.location.href = target.toString();
+			}
+			function submitCustom(){
+				const name = document.getElementById('name').value.trim() || 'Simulated User';
+				const email = document.getElementById('email').value.trim() || 'simulated@gdgc.edu';
+				if(!email.includes('@')){alert('Enter a valid email address');return;}
+				finish(email,name);
+			}
+		</script>
+	</body>
+	</html>`;
 }

@@ -1,10 +1,10 @@
+import { env } from '$env/dynamic/private';
 import { json, type RequestHandler } from '@sveltejs/kit';
+
 import { writeEmails } from '$lib/server/db';
 
-function clear() {
-  writeEmails([]);
-  return json({ message: 'Email inbox cleared' });
-}
-
-export const GET: RequestHandler = async () => clear();
-export const POST: RequestHandler = async () => clear();
+export const POST: RequestHandler = async () => {
+	if (env.NODE_ENV === 'production') return json({ error: 'Not found' }, { status: 404 });
+	await writeEmails([]);
+	return json({ message: 'Email inbox cleared' });
+};

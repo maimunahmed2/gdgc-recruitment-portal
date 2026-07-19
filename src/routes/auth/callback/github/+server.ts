@@ -1,147 +1,60 @@
 import { env } from '$env/dynamic/private';
-import { oauthResponseHtml } from '$lib/server/oauth';
 import type { RequestHandler } from '@sveltejs/kit';
 
-type GitHubProfile = {
-	email?: string | null;
-	name?: string | null;
-	login?: string | null;
-};
-
-type GitHubEmail = {
-	email: string;
-	primary?: boolean;
-	verified?: boolean;
-	visibility?: string | null;
-};
-
-type GitHubTokenResponse = {
-	access_token?: string;
-	error?: string;
-	error_description?: string;
-};
+import { completeOAuth } from '$lib/server/oauth';
 
 export const GET: RequestHandler = async (event) => {
 	try {
-		const mock = event.url.searchParams.get('mock');
-		const email = event.url.searchParams.get('email');
-		const name = event.url.searchParams.get('name');
-		const code = event.url.searchParams.get('code');
+		const params = event.url.searchParams;
+		const state = params.get('state') ?? '';
+		const expectedState = event.cookies.get('oauth_state') ?? '';
+		if (!state || state !== expectedState) return completeOAuth(event, '', '', 'github', 'Invalid OAuth state');
+		event.cookies.delete('oauth_state', { path: '/' });
 
-		if (mock === 'true') {
-			return html(await oauthResponseHtml(event, email || '', name || 'GitHub User', 'github'));
+		if (params.get('mock') === 'true') {
+			return completeOAuth(event, params.get('email') ?? '', params.get('name') ?? '', 'github');
 		}
 
-		if (!code) {
-			return html(
-				await oauthResponseHtml(event, '', '', 'github', 'Authorization code is missing')
-			);
-		}
+		const code = params.get('code');
+		if (!code) return completeOAuth(event, '', '', 'github', 'Authorization code is missing');
+		if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET) return completeOAuth(event, '', '', 'github', 'GitHub OAuth credentials are missing');
 
 		const redirectUri = `${event.url.origin}/auth/callback/github`;
-
 		const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
 			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				Accept: 'application/json'
-			},
+			headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
 			body: JSON.stringify({
 				code,
-				client_id: env.GITHUB_CLIENT_ID || '',
-				client_secret: env.GITHUB_CLIENT_SECRET || '',
+				client_id: env.GITHUB_CLIENT_ID,
+				client_secret: env.GITHUB_CLIENT_SECRET,
 				redirect_uri: redirectUri
 			})
 		});
+		if (!tokenResponse.ok) return completeOAuth(event, '', '', 'github', `Failed to exchange token: ${await tokenResponse.text()}`);
 
-		if (!tokenResponse.ok) {
-			const errorText = await tokenResponse.text();
+		const tokens = await tokenResponse.json() as { access_token?: string };
+		if (!tokens.access_token) return completeOAuth(event, '', '', 'github', 'No access token returned from GitHub');
 
-			return html(
-				await oauthResponseHtml(
-					event,
-					'',
-					'',
-					'github',
-					`Failed to exchange token: ${errorText}`
-				)
-			);
-		}
+		const headers = {
+			Authorization: `Bearer ${tokens.access_token}`,
+			'User-Agent': 'GDGC-Recruitment-Portal'
+		};
+		const profileResponse = await fetch('https://api.github.com/user', { headers });
+		if (!profileResponse.ok) return completeOAuth(event, '', '', 'github', 'Failed to retrieve profile information');
 
-		const tokens = (await tokenResponse.json()) as GitHubTokenResponse;
-		const accessToken = tokens.access_token;
-
-		if (!accessToken) {
-			const errorMessage =
-				tokens.error_description || tokens.error || 'No access token returned from GitHub';
-
-			return html(await oauthResponseHtml(event, '', '', 'github', errorMessage));
-		}
-
-		const profileResponse = await fetch('https://api.github.com/user', {
-			headers: {
-				Authorization: `Bearer ${accessToken}`,
-				'User-Agent': 'GDGC-Recruitment-Portal'
-			}
-		});
-
-		if (!profileResponse.ok) {
-			return html(
-				await oauthResponseHtml(
-					event,
-					'',
-					'',
-					'github',
-					'Failed to retrieve profile information'
-				)
-			);
-		}
-
-		const profile = (await profileResponse.json()) as GitHubProfile;
-		let githubEmail = profile.email || '';
-
-		if (!githubEmail) {
-			const emailsResponse = await fetch('https://api.github.com/user/emails', {
-				headers: {
-					Authorization: `Bearer ${accessToken}`,
-					'User-Agent': 'GDGC-Recruitment-Portal'
-				}
-			});
-
+		const profile = await profileResponse.json() as { email?: string | null; name?: string | null; login?: string };
+		let email = profile.email ?? '';
+		if (!email) {
+			const emailsResponse = await fetch('https://api.github.com/user/emails', { headers });
 			if (emailsResponse.ok) {
-				const emails = (await emailsResponse.json()) as GitHubEmail[];
-
-				if (Array.isArray(emails) && emails.length > 0) {
-					const primaryEmail = emails.find((item) => item.primary) || emails[0];
-					githubEmail = primaryEmail.email;
-				}
+				const emails = await emailsResponse.json() as Array<{ email: string; primary?: boolean }>;
+				email = (emails.find((item) => item.primary) ?? emails[0])?.email ?? '';
 			}
 		}
+		if (!email) email = `${profile.login ?? 'github_user'}@users.noreply.github.com`;
 
-		if (!githubEmail) {
-			githubEmail = `${profile.login || 'github_user'}@users.noreply.github.com`;
-		}
-
-		return html(
-			await oauthResponseHtml(
-				event,
-				githubEmail,
-				profile.name || profile.login || 'GitHub User',
-				'github'
-			)
-		);
-	} catch (error: unknown) {
-		const message =
-			error instanceof Error ? error.message : 'Server error during GitHub auth callback';
-
-		return html(await oauthResponseHtml(event, '', '', 'github', message));
+		return completeOAuth(event, email, profile.name ?? profile.login ?? 'GitHub User', 'github');
+	} catch (error) {
+		return completeOAuth(event, '', '', 'github', error instanceof Error ? error.message : 'Server error during GitHub callback');
 	}
 };
-
-function html(body: string) {
-	return new Response(body, {
-		headers: {
-			'Content-Type': 'text/html'
-		}
-	});
-}

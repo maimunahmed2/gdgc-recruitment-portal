@@ -9,6 +9,7 @@
 		Lock,
 		Mail,
 		RefreshCw,
+		Shield,
 		ShieldCheck,
 		User,
 		XCircle
@@ -75,6 +76,7 @@
 	let email = $state(initialEmail);
 	let password = $state('');
 	let confirmPassword = $state('');
+	let adminCode = $state('');
 	let rememberMe = $state(false);
 	let otpCode = $state(initialCode);
 
@@ -286,7 +288,12 @@
 			const response = await fetch('/api/auth/register', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ name, email, password })
+				body: JSON.stringify({
+					name: name.trim(),
+					email: email.trim(),
+					password,
+					adminCode
+				})
 			});
 			const data = await parseResponse(response);
 
@@ -559,7 +566,7 @@
 					<ShieldCheck class="h-6 w-6 text-indigo-600 dark:text-indigo-400" />
 				</div>
 				<h2 class="font-sans text-xl font-bold tracking-tight text-slate-900 dark:text-white">
-					GDGC Secure Portal
+					GDGC Recruitment Portal
 				</h2>
 				<p class="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">
 					Secure Unified Candidate Authentication
@@ -963,6 +970,33 @@
 									Passwords do not match.
 								</p>
 							{/if}
+						</div>
+
+						<div>
+							<label
+								for="signup-admin-code-input"
+								class="mb-1.5 flex justify-between text-xs font-semibold text-slate-600 dark:text-slate-400"
+							>
+								<span>Admin Code (Optional)</span>
+								<span class="text-[10px] font-normal text-indigo-500 dark:text-indigo-400">
+									To register as an Administrator
+								</span>
+							</label>
+
+							<div class="relative">
+								<span class="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+									<Shield class="h-4 w-4" />
+								</span>
+
+								<input
+									id="signup-admin-code-input"
+									type="password"
+									bind:value={adminCode}
+									placeholder="Enter admin secret for Admin privileges"
+									autocomplete="off"
+									class="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pr-3 pl-9 text-sm text-slate-900 transition-all focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100"
+								/>
+							</div>
 						</div>
 
 						<button
@@ -1534,7 +1568,10 @@
 			💡 Tester Demo Credentials
 		</h4>
 		<p class="mb-3 text-[10px] text-slate-400 dark:text-slate-500">
-			Click either account below to instantly pre-fill credentials and prepare login details!
+			Click an account below to pre-fill credentials, or register a custom Admin account using code:
+			<strong class="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+				GDGC_ADMIN_2026
+			</strong>
 		</p>
 		<div class="grid grid-cols-2 gap-3 text-[11px]">
 			<button
